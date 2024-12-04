@@ -19,7 +19,7 @@ use Thelia\Tools\URL;
 
 trait CatalogBreadcrumbTrait
 {
-    public function getBaseBreadcrumb(Router $router, $categoryId)
+    public function getBaseBreadcrumb(Router $router, $categoryId, $locale)
     {
         $translator = Translator::getInstance();
         $catalogUrl = $router->generate('admin.catalog', [], Router::ABSOLUTE_URL);
@@ -33,15 +33,16 @@ trait CatalogBreadcrumbTrait
         $results = [];
 
         // Todo refactor this ugly code
+        $currentId = $categoryId;
         do {
             $category = CategoryQuery::create()
-                ->filterById($categoryId)
+                ->filterById($currentId)
                 ->findOne();
 
             if ($category != null) {
                 $results[] = [
                     'ID' => $category->getId(),
-                    'TITLE' => $category->getTitle(),
+                    'TITLE' => $category->setLocale($locale)->getTitle(),
                     'URL' => $category->getUrl(),
                 ];
 
@@ -52,7 +53,7 @@ trait CatalogBreadcrumbTrait
                     if (\in_array($currentId, $ids)) {
                         throw new \LogicException(
                             sprintf(
-                                'Circular reference detected in folder ID=%d hierarchy (folder ID=%d appears more than one times in path)',
+                                'Circular reference detected in category ID=%d hierarchy (category ID=%d appears more than one times in path)',
                                 $categoryId,
                                 $currentId
                             )
@@ -80,7 +81,7 @@ trait CatalogBreadcrumbTrait
         /** @var \Thelia\Model\Product $product */
         $product = $this->getProduct();
 
-        $breadcrumb = $this->getBaseBreadcrumb($router, $product->getDefaultCategoryId());
+        $breadcrumb = $this->getBaseBreadcrumb($router, $product->getDefaultCategoryId(), $locale);
 
         $product->setLocale($locale);
 
@@ -102,7 +103,7 @@ trait CatalogBreadcrumbTrait
 
         /** @var \Thelia\Model\Category $category */
         $category = $this->getCategory();
-        $breadcrumb = $this->getBaseBreadcrumb($router, $this->getParentId());
+        $breadcrumb = $this->getBaseBreadcrumb($router, $this->getParentId(), $locale);
 
         $category->setLocale($locale);
 

@@ -12,7 +12,7 @@
 
 namespace TheliaSmarty\Template\Plugins;
 
-use CommerceGuys\Addressing\Model\Address;
+use CommerceGuys\Addressing\Address;
 use Symfony\Component\DependencyInjection\Container;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Thelia\Core\HttpFoundation\Session\Session;
@@ -126,7 +126,7 @@ class Format extends AbstractSmartyPlugin
 
     private function formatDateWithLocale(\DateTime $date, $locale, $format)
     {
-        if (false === strpos($format, '%')) {
+        if (!str_contains($format, '%')) {
             $formatter = new \IntlDateFormatter($locale, \IntlDateFormatter::FULL, \IntlDateFormatter::FULL);
 
             $icuFormat = $this->convertDatePhpToIcu($format);
@@ -395,7 +395,7 @@ class Format extends AbstractSmartyPlugin
         // extract html attributes
         $htmlAttributes = [];
         foreach ($params as $k => $v) {
-            if (strpos($k, 'html_') !== false && $k !== 'html_tag') {
+            if (str_contains($k, 'html_') && $k !== 'html_tag') {
                 $htmlAttributes[substr($k, 5)] = $v;
             }
         }
@@ -452,7 +452,9 @@ class Format extends AbstractSmartyPlugin
             'address_line1',
             'address_line2',
             'organization',
-            'recipient',
+            'given_name',
+            'additional_name',
+            'family_name',
             'locale',
         ];
         $valid = false;
