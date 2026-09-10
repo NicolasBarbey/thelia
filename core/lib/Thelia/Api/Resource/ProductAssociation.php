@@ -25,6 +25,7 @@ use Symfony\Component\Serializer\Annotation\Groups;
 use Thelia\Api\Bridge\Propel\Attribute\Relation;
 use Thelia\Api\Bridge\Propel\Filter\OrderFilter;
 use Thelia\Api\Bridge\Propel\Filter\SearchFilter;
+use Thelia\Api\Service\API\PublicUrlPreloader;
 use Thelia\Api\State\Processor\ProductAssociationProcessor;
 use Thelia\Model\Map\AccessoryTableMap;
 
@@ -47,6 +48,19 @@ use Thelia\Model\Map\AccessoryTableMap;
  *
  * `position` is read-only here. Reordering a block already has its own event and
  * its own back-office screen, and nothing asks the API for it yet.
+ *
+ * Both products come out whole rather than as a bare IRI, carrying what a card
+ * of a block shows: the wording, the rewritten url and the sale elements, the
+ * default one told apart by `isDefault`. A theme therefore renders a block out
+ * of this one read. Prices are not part of it: they are not serialized on the
+ * sale element anywhere in this API, and a front resolves them on its own.
+ *
+ * The collection is paginated on the defaults the core sets for the whole API
+ * (`Config/Resources/packages/api_platform.php`): thirty rows a page, `page` to
+ * walk them, and `itemsPerPage` for the caller to ask for another size, capped
+ * at a hundred. A block of a product sheet holds far fewer than thirty, so a
+ * theme reads one in a single call without naming any of them; an integration
+ * walking every relation of a catalogue is the one that pages.
  */
 #[ApiResource(
     operations: [
@@ -96,7 +110,7 @@ use Thelia\Model\Map\AccessoryTableMap;
         'type.code',
     ],
 )]
-class ProductAssociation implements PropelResourceInterface
+class ProductAssociation implements PropelResourceInterface, CollectionPreloadableInterface
 {
     use PropelResourceTrait;
 
@@ -109,11 +123,11 @@ class ProductAssociation implements PropelResourceInterface
     #[Groups([self::GROUP_ADMIN_READ, self::GROUP_FRONT_READ])]
     public ?int $id = null;
 
-    #[Relation(targetResource: Product::class, relationAlias: 'ProductRelatedByProductId')]
+    #[Relation(targetResource: Product::class, relationAlias: 'ProductRelatedByProductId', preload: true)]
     #[Groups([self::GROUP_ADMIN_READ, self::GROUP_FRONT_READ, self::GROUP_ADMIN_WRITE])]
     public Product $product;
 
-    #[Relation(targetResource: Product::class, relationAlias: 'ProductRelatedByAccessory')]
+    #[Relation(targetResource: Product::class, relationAlias: 'ProductRelatedByAccessory', preload: true)]
     #[Groups([self::GROUP_ADMIN_READ, self::GROUP_FRONT_READ, self::GROUP_ADMIN_WRITE])]
     public Product $associatedProduct;
 
@@ -212,6 +226,41 @@ class ProductAssociation implements PropelResourceInterface
         $this->updatedAt = $updatedAt;
 
         return $this;
+    }
+
+    /**
+     * Resolves the rewritten url of the products of a whole page at once.
+     *
+     * `publicUrl` is in the read groups of the products this relation carries, so
+     * the serializer asks each of them for it, and each answer is a rewriting_url
+     * read of its own — one per card of the block. {@see PublicUrlPreloader} does
+     * that for the members of a page, but these products are held by the members
+     * rather than being them, so nothing covered them.
+     */
+    public static function preloadCollection(array $resources): void
+    {
+        $productsByLocale = [];
+
+        foreach ($resources as $resource) {
+            if (!$resource instanceof self) {
+                continue;
+            }
+
+            foreach ([$resource->product ?? null, $resource->associatedProduct ?? null] as $product) {
+                if (!$product instanceof Product || null === $product->getId()) {
+                    continue;
+                }
+
+                $locale = $product->getPropelModel()?->getLocale() ?: $product->getDefaultLocale();
+                $productsByLocale[$locale][$product->getId()] = $product;
+            }
+        }
+
+        $preloader = new PublicUrlPreloader();
+
+        foreach ($productsByLocale as $locale => $products) {
+            $preloader->preload($products, (string) $locale);
+        }
     }
 
     public static function getPropelRelatedTableMap(): ?TableMap
