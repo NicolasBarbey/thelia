@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace Thelia\Domain\Legal;
 
+use Symfony\Component\DependencyInjection\Attribute\Exclude;
 use Thelia\Domain\Legal\Enum\VatVerificationStatus;
 
 /**
@@ -28,6 +29,7 @@ use Thelia\Domain\Legal\Enum\VatVerificationStatus;
  * and listeners, and a VAT number identifies a business as precisely as its
  * name does, so it stays with the address it was read from.
  */
+#[Exclude]
 final readonly class VatVerificationResult
 {
     private function __construct(
