@@ -456,6 +456,8 @@
     <column name="company" size="255" type="VARCHAR" />
     <column name="siret" size="20" type="VARCHAR" />
     <column name="vat_number" size="20" type="VARCHAR" />
+    <column description="when a verification service last confirmed the VAT number, NULL as long as none has, which is what keeps an unverified address taxed" name="vat_verified_at" type="TIMESTAMP" />
+    <column description="the business name the verification service returned for the VAT number, when it discloses one" name="vat_verified_name" size="255" type="VARCHAR" />
     <column name="firstname" required="true" size="255" type="VARCHAR" />
     <column name="lastname" required="true" size="255" type="VARCHAR" />
     <column name="address1" required="true" size="255" type="VARCHAR" />
@@ -728,6 +730,9 @@
     <column name="company" size="255" type="VARCHAR" />
     <column name="siret" size="20" type="VARCHAR" />
     <column name="vat_number" size="20" type="VARCHAR" />
+    <column description="when a verification service last confirmed the VAT number, NULL as long as none has, which is what keeps an unverified address taxed" name="vat_verified_at" type="TIMESTAMP" />
+    <column description="the business name the verification service returned for the VAT number, when it discloses one" name="vat_verified_name" size="255" type="VARCHAR" />
+    <column defaultValue="0" description="the order left without VAT because the buyer is liable for it, frozen here so that revoking the number afterwards never changes what was invoiced" name="vat_exempted" required="true" type="TINYINT" />
     <column name="firstname" required="true" size="255" type="VARCHAR" />
     <column name="lastname" required="true" size="255" type="VARCHAR" />
     <column name="address1" required="true" size="255" type="VARCHAR" />
@@ -1370,6 +1375,8 @@
     <column name="company" size="255" type="VARCHAR" />
     <column name="siret" size="20" type="VARCHAR" />
     <column name="vat_number" size="20" type="VARCHAR" />
+    <column description="when a verification service last confirmed the VAT number, NULL as long as none has, which is what keeps an unverified address taxed" name="vat_verified_at" type="TIMESTAMP" />
+    <column description="the business name the verification service returned for the VAT number, when it discloses one" name="vat_verified_name" size="255" type="VARCHAR" />
     <column name="firstname" required="true" size="255" type="VARCHAR" />
     <column name="lastname" required="true" size="255" type="VARCHAR" />
     <column name="address1" required="true" size="255" type="VARCHAR" />

@@ -44,6 +44,8 @@ readonly class OrderAddressPersister
             ->setCompany($deliveryAddress->getCompany())
             ->setSiret($deliveryAddress->getSiret())
             ->setVatNumber($deliveryAddress->getVatNumber())
+            ->setVatVerifiedAt($deliveryAddress->getVatVerifiedAt())
+            ->setVatVerifiedName($deliveryAddress->getVatVerifiedName())
             ->setFirstname($deliveryAddress->getFirstname())
             ->setLastname($deliveryAddress->getLastname())
             ->setAddress1($deliveryAddress->getAddress1())
@@ -62,6 +64,8 @@ readonly class OrderAddressPersister
             ->setCompany($invoiceAddress->getCompany())
             ->setSiret($invoiceAddress->getSiret())
             ->setVatNumber($invoiceAddress->getVatNumber())
+            ->setVatVerifiedAt($invoiceAddress->getVatVerifiedAt())
+            ->setVatVerifiedName($invoiceAddress->getVatVerifiedName())
             ->setFirstname($invoiceAddress->getFirstname())
             ->setLastname($invoiceAddress->getLastname())
             ->setAddress1($invoiceAddress->getAddress1())
@@ -72,7 +76,7 @@ readonly class OrderAddressPersister
             ->setPhone($invoiceAddress->getPhone())
             ->setCellphone($invoiceAddress->getCellphone())
             ->setCountryId($invoiceAddress->getCountryId())
-            ->setStateId($deliveryAddress->getStateId());
+            ->setStateId($invoiceAddress->getStateId());
         $invoiceOrderAddress->save($connection);
 
         $order->setDeliveryOrderAddressId($deliveryOrderAddress->getId());
