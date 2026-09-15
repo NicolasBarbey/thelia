@@ -1,0 +1,341 @@
+<?php
+
+declare(strict_types=1);
+
+/*
+ * This file is part of the Thelia package.
+ * http://www.thelia.net
+ *
+ * (c) OpenStudio <info@thelia.net>
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+namespace Thelia\Tests\Integration\Domain\Taxation;
+
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Thelia\Core\Event\Order\OrderEvent;
+use Thelia\Core\Event\Order\OrderPaymentEvent;
+use Thelia\Core\Event\TheliaEvents;
+use Thelia\Core\HttpFoundation\Session\Session;
+use Thelia\Domain\Checkout\Service\CheckoutPaymentService;
+use Thelia\Domain\Taxation\Enum\VatExemptionMode;
+use Thelia\Model\Cart;
+use Thelia\Model\CartAddress;
+use Thelia\Model\CartItem;
+use Thelia\Model\ConfigQuery;
+use Thelia\Model\Country;
+use Thelia\Model\ModuleQuery;
+use Thelia\Model\Order;
+use Thelia\Model\OrderProductQuery;
+use Thelia\Model\OrderProductTaxQuery;
+use Thelia\Model\ProductSaleElementsQuery;
+use Thelia\Test\ActionIntegrationTestCase;
+
+/**
+ * A whole order placed under reverse charge, and the same one placed without it.
+ *
+ * What is being pinned is that the exemption reaches the amounts actually
+ * written down, not only the resolver's opinion: no order_product_tax row at
+ * all, which is what keeps the totals as invoiced once the buyer's number is
+ * revoked, and the attestation frozen on the billing address.
+ */
+final class VatExemptedOrderTest extends ActionIntegrationTestCase
+{
+    /** @var list<array{0: string, 1: callable}> */
+    private array $registeredListeners = [];
+
+    /** @var array<string, Country> */
+    private array $countries = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->registeredListeners as [$eventName, $listener]) {
+            $this->kernelDispatcher()->removeListener($eventName, $listener);
+        }
+        $this->registeredListeners = [];
+
+        // Both memoize in static caches that outlive the transaction rollback.
+        ConfigQuery::resetCache();
+        Country::resetDefaultCountryCache();
+
+        parent::tearDown();
+    }
+
+    public function testAVerifiedBuyerAbroadIsInvoicedWithoutAnyTaxLine(): void
+    {
+        $this->configure(VatExemptionMode::VERIFIED_VAT_NUMBER);
+        $order = $this->checkout($this->createCheckoutReadyCart('BE', new \DateTime('-10 days')));
+
+        self::assertSame(
+            0,
+            $this->taxLinesOf($order),
+            'An exempt order must carry no tax line: the totals are read back from those rows.',
+        );
+        self::assertSame(1, $order->getOrderAddressRelatedByInvoiceOrderAddressId()->getVatExempted());
+        self::assertEqualsWithDelta(0.0, (float) $order->getPostageTax(), 0.0001);
+        $tax = 0.0;
+        self::assertEqualsWithDelta(10.0, (float) $order->getTotalAmount($tax), 0.0001);
+        self::assertEqualsWithDelta(0.0, $tax, 0.0001, 'The VAT of an exempt order is zero.');
+    }
+
+    public function testAnExemptCartIsShownUntaxedBeforeTheOrderIsEvenPlaced(): void
+    {
+        $this->configure(VatExemptionMode::VERIFIED_VAT_NUMBER);
+        $cart = $this->cartWithItems('BE', new \DateTime('-10 days'));
+        $country = $this->countryOf('FR');
+
+        self::assertEqualsWithDelta(
+            $cart->getTotalAmount(false, $country),
+            $cart->getTaxedAmount($country, false),
+            0.0001,
+            'The buyer must see the untaxed total in the cart, not only on the invoice.',
+        );
+        self::assertEqualsWithDelta(0.0, (float) $cart->getTotalVAT($country, null, false), 0.0001);
+    }
+
+    public function testTheSameCartIsShownTaxedWhenTheSettingIsOff(): void
+    {
+        $this->configure(VatExemptionMode::DISABLED);
+        $cart = $this->cartWithItems('BE', new \DateTime('-10 days'));
+        $country = $this->countryOf('FR');
+
+        self::assertGreaterThan(
+            0.0,
+            (float) $cart->getTotalVAT($country, null, false),
+            'The control cart must actually carry VAT, or it proves nothing.',
+        );
+    }
+
+    public function testTheSameOrderKeepsItsTaxWhenTheSettingIsOff(): void
+    {
+        $this->configure(VatExemptionMode::DISABLED);
+        $order = $this->checkout($this->createCheckoutReadyCart('BE', new \DateTime('-10 days')));
+
+        self::assertGreaterThan(
+            0,
+            $this->taxLinesOf($order),
+            'Without the setting the very same order must be taxed as before.',
+        );
+        self::assertSame(0, $order->getOrderAddressRelatedByInvoiceOrderAddressId()->getVatExempted());
+        $tax = 0.0;
+        $order->getTotalAmount($tax);
+        self::assertGreaterThan(0.0, $tax, 'The control order must actually carry VAT, or it proves nothing.');
+    }
+
+    /**
+     * The cart is built before its lines are, and it caches the empty collection
+     * it was saved with: reading totals off it without reloading compares zero
+     * to zero and proves nothing.
+     */
+    private function cartWithItems(string $billingCountryCode, ?\DateTime $verifiedAt): Cart
+    {
+        $cart = $this->createCheckoutReadyCart($billingCountryCode, $verifiedAt)['cart'];
+        $cart->clearCartItems();
+
+        self::assertCount(1, $cart->getCartItems());
+
+        return $cart;
+    }
+
+    private function taxLinesOf(Order $order): int
+    {
+        $orderProductIds = OrderProductQuery::create()
+            ->filterByOrderId($order->getId())
+            ->select('Id')
+            ->find($this->getPropelConnection())
+            ->getData();
+
+        return OrderProductTaxQuery::create()
+            ->filterByOrderProductId($orderProductIds)
+            ->count($this->getPropelConnection());
+    }
+
+    private function configure(VatExemptionMode $mode): void
+    {
+        ConfigQuery::write(VatExemptionMode::CONFIG_KEY, $mode->value);
+        ConfigQuery::write('store_vat_exempt', '0');
+        ConfigQuery::write('store_country', (string) $this->countryOf('FR')->getId());
+    }
+
+    /**
+     * @return array{cart: Cart, customer: \Thelia\Model\Customer, currency: \Thelia\Model\Currency, deliveryModule: \Thelia\Model\Module, paymentModule: \Thelia\Model\Module, deliveryAddressId: int, invoiceAddressId: int}
+     */
+    private function createCheckoutReadyCart(string $billingCountryCode, ?\DateTime $verifiedAt): array
+    {
+        $currency = $this->factory->currency();
+        $customerTitle = $this->factory->customerTitle();
+        $customer = $this->factory->customer($customerTitle);
+        $shopCountry = $this->countryOf('FR');
+        $product = $this->factory->product(
+            $this->factory->category(),
+            $this->taxRuleTaxingAt($shopCountry, '20'),
+            $currency,
+            ['baseQuantity' => 100],
+        );
+
+        $deliveryAddress = $this->createCartAddress($customerTitle->getId(), $shopCountry->getId(), null, null);
+        $invoiceAddress = $this->createCartAddress(
+            $customerTitle->getId(),
+            $this->countryOf($billingCountryCode)->getId(),
+            $billingCountryCode.'0123456789',
+            $verifiedAt,
+        );
+
+        $deliveryModule = ModuleQuery::create()->findOneByCode('CustomDelivery')
+            ?? throw new \RuntimeException('No delivery module installed - run bin/test-prepare.');
+        $paymentModule = ModuleQuery::create()->findOneByCode('Cheque')
+            ?? throw new \RuntimeException('No payment module installed - run bin/test-prepare.');
+
+        $cart = (new Cart())
+            ->setCustomerId($customer->getId())
+            ->setCurrencyId($currency->getId())
+            ->setToken(uniqid('vat-exemption-', true))
+            ->setAddressDeliveryId($deliveryAddress->getId())
+            ->setAddressInvoiceId($invoiceAddress->getId())
+            ->setDeliveryModuleId($deliveryModule->getId())
+            ->setPaymentModuleId($paymentModule->getId());
+        $cart->save($this->getPropelConnection());
+
+        $productSaleElements = ProductSaleElementsQuery::create()
+            ->filterByProductId($product->getId())
+            ->findOne();
+        self::assertNotNull($productSaleElements);
+
+        (new CartItem())
+            ->setCartId($cart->getId())
+            ->setProductId($product->getId())
+            ->setProductSaleElementsId($productSaleElements->getId())
+            ->setQuantity(1)
+            ->setPrice('10.00')
+            ->setPromoPrice('10.00')
+            ->setPromo(0)
+            ->save($this->getPropelConnection());
+
+        return [
+            'cart' => $cart,
+            'customer' => $customer,
+            'currency' => $currency,
+            'deliveryModule' => $deliveryModule,
+            'paymentModule' => $paymentModule,
+            'deliveryAddressId' => $deliveryAddress->getId(),
+            'invoiceAddressId' => $invoiceAddress->getId(),
+        ];
+    }
+
+    /**
+     * A rule that actually taxes in the delivery country: the seeded one carries
+     * no tax there, so an order built on it would be untaxed either way and the
+     * control would prove nothing.
+     */
+    private function taxRuleTaxingAt(Country $country, string $percent): \Thelia\Model\TaxRule
+    {
+        $taxRule = $this->factory->taxRule(['isDefault' => false]);
+        $tax = $this->factory->tax(['requirements' => ['percent' => $percent], 'title' => 'VAT '.$percent]);
+
+        (new \Thelia\Model\TaxRuleCountry())
+            ->setTaxRuleId($taxRule->getId())
+            ->setCountryId($country->getId())
+            ->setTaxId($tax->getId())
+            ->setPosition(1)
+            ->save($this->getPropelConnection());
+
+        return $taxRule;
+    }
+
+    private function createCartAddress(int $titleId, int $countryId, ?string $vatNumber, ?\DateTime $verifiedAt): CartAddress
+    {
+        $cartAddress = (new CartAddress())
+            ->setCustomerTitleId($titleId)
+            ->setFirstname('John')
+            ->setLastname('Doe')
+            ->setAddress1('1 Main Street')
+            ->setAddress2('')
+            ->setAddress3('')
+            ->setZipcode('1000')
+            ->setCity('Brussels')
+            ->setCountryId($countryId);
+
+        if (null !== $vatNumber) {
+            $cartAddress
+                ->setCompany('Acme')
+                ->setVatNumber($vatNumber)
+                ->setVatVerifiedAt($verifiedAt);
+        }
+
+        $cartAddress->save($this->getPropelConnection());
+
+        return $cartAddress;
+    }
+
+    /**
+     * FixtureFactory::country() inserts a new row on every call that carries
+     * overrides, so asking twice for "FR" would hand out two different countries
+     * and silently compare a tax rule against a country nothing was bound to.
+     */
+    private function countryOf(string $isoAlpha2): Country
+    {
+        return $this->countries[$isoAlpha2] ??= $this->factory->country([
+            'isocode' => $isoAlpha2,
+            'isoalpha2' => $isoAlpha2,
+            'isoalpha3' => $isoAlpha2.'X',
+        ]);
+    }
+
+    private function listen(string $eventName, callable $listener, int $priority = 0): void
+    {
+        $this->kernelDispatcher()->addListener($eventName, $listener, $priority);
+        $this->registeredListeners[] = [$eventName, $listener];
+    }
+
+    private function kernelDispatcher(): EventDispatcherInterface
+    {
+        return static::getContainer()->get('event_dispatcher');
+    }
+
+    private function session(): Session
+    {
+        return static::getContainer()->get('request_stack')->getCurrentRequest()->getSession();
+    }
+
+    /**
+     * @param array{cart: Cart, customer: \Thelia\Model\Customer, currency: \Thelia\Model\Currency, deliveryModule: \Thelia\Model\Module, paymentModule: \Thelia\Model\Module, deliveryAddressId: int, invoiceAddressId: int} $fixtures
+     */
+    private function checkout(array $fixtures): Order
+    {
+        $session = $this->session();
+        $session->setCustomerUser($fixtures['customer']);
+        $session->setSessionCart($fixtures['cart']);
+        $session->setCurrency($fixtures['currency']);
+
+        $placedOrder = null;
+        $this->listen(
+            TheliaEvents::ORDER_BEFORE_PAYMENT,
+            static function (OrderEvent $event) use (&$placedOrder): void {
+                $placedOrder = $event->getOrder();
+            },
+        );
+        // The payment module would answer with its own payment page; the amounts
+        // are settled by then, so the chain stops here.
+        $this->listen(
+            TheliaEvents::MODULE_PAY,
+            static function (OrderPaymentEvent $event): void {
+                $event->stopPropagation();
+            },
+            256,
+        );
+
+        $this->getService(CheckoutPaymentService::class)->pay(
+            $fixtures['cart'],
+            $fixtures['deliveryAddressId'],
+            $fixtures['invoiceAddressId'],
+            $fixtures['deliveryModule']->getId(),
+            $fixtures['paymentModule']->getId(),
+        );
+
+        self::assertInstanceOf(Order::class, $placedOrder, 'The checkout did not place an order.');
+
+        return $placedOrder;
+    }
+}

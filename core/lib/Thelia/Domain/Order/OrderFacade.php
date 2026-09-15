@@ -32,6 +32,7 @@ use Thelia\Domain\Order\Service\TaxProvider;
 use Thelia\Domain\Order\Service\TranslationProvider;
 use Thelia\Domain\Order\Service\VirtualProductHandler;
 use Thelia\Domain\Shipping\Service\PostageTaxBreakdownCalculator;
+use Thelia\Domain\Taxation\Service\VatExemptionResolver;
 use Thelia\Exception\TheliaProcessException;
 use Thelia\Model\Cart as CartModel;
 use Thelia\Model\ConfigQuery;
@@ -62,6 +63,7 @@ readonly class OrderFacade
         private ConsentProvider $consentProvider,
         private ConsentAcceptanceStore $consentAcceptanceStore,
         private RequestStack $requestStack,
+        private VatExemptionResolver $vatExemptionResolver,
     ) {
     }
 
@@ -108,17 +110,25 @@ readonly class OrderFacade
         try {
             $placedOrder = $this->orderFactory->createFromSessionOrder($sessionOrder, $currency, $lang, $cart, $customer);
 
+            // Decided once, here, on the cart that is being turned into an order,
+            // and never asked again afterwards: from now on the answer is the
+            // vat_exempted the billing address was frozen with.
+            $vatExempted = $this->vatExemptionResolver->isExemptedForCart($cart);
+
             $taxCountry = $this->orderAddressPersister->prepareOrderAddresses(
                 $placedOrder,
                 $cart,
                 $useOrderDefinedAddresses,
+                $vatExempted,
                 $connection
             );
 
             $placedOrder->setStatusId(OrderStatusQuery::getNotPaidStatus()?->getId());
             $placedOrder->save($connection);
 
-            $this->persistPostageTaxBreakdown($placedOrder, $cart, $taxCountry, $lang, $connection);
+            if (!$vatExempted) {
+                $this->persistPostageTaxBreakdown($placedOrder, $cart, $taxCountry, $lang, $connection);
+            }
 
             if ($recordConsentAnswers) {
                 $this->persistConsentAcceptances($placedOrder, $lang, $connection);
@@ -167,7 +177,11 @@ readonly class OrderFacade
                 // Taxes
                 $taxRuleI18n = $this->translationProvider->getTaxRuleTranslation($lang->getLocale(), $product->getTaxRuleId());
 
-                $taxDetails = $this->taxProvider->computeTaxesForCartItem(
+                // An exempt order is written with no tax line at all rather than with
+                // lines worth zero: the totals are read back from those rows, so their
+                // absence is what keeps the amounts as invoiced once the buyer's number
+                // is revoked or the shop turns the setting off.
+                $taxDetails = $vatExempted ? [] : $this->taxProvider->computeTaxesForCartItem(
                     $product,
                     $taxCountry,
                     (float) $cartItem->getPrice(),
@@ -233,6 +247,11 @@ readonly class OrderFacade
      * in `postage_tax_rule_title`, exactly like every order placed so far.
      *
      * @throws PropelException
+     */
+    /**
+     * Only called for a taxed order: an exempt one carries no postage tax to
+     * split, and the strategies that spread it read the tax rules of the goods,
+     * which would put a rate back on a carriage that owes none.
      */
     private function persistPostageTaxBreakdown(
         ModelOrder $placedOrder,

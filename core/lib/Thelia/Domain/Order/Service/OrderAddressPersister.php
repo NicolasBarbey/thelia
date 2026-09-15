@@ -28,6 +28,7 @@ readonly class OrderAddressPersister
         ModelOrder $order,
         CartModel $cart,
         bool $useOrderDefinedAddresses,
+        bool $vatExempted,
         ConnectionInterface $connection,
     ): Country {
         if ($useOrderDefinedAddresses) {
@@ -76,7 +77,9 @@ readonly class OrderAddressPersister
             ->setPhone($invoiceAddress->getPhone())
             ->setCellphone($invoiceAddress->getCellphone())
             ->setCountryId($invoiceAddress->getCountryId())
-            ->setStateId($invoiceAddress->getStateId());
+            ->setStateId($invoiceAddress->getStateId())
+            // TINYINT: the generated setter is typed ?int, a bool would not pass.
+            ->setVatExempted($vatExempted ? 1 : 0);
         $invoiceOrderAddress->save($connection);
 
         $order->setDeliveryOrderAddressId($deliveryOrderAddress->getId());

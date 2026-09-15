@@ -1220,6 +1220,7 @@ DEALLOCATE PREPARE add_column_statement;
 -- A shop that upgrades keeps taxing the way it did: the setting arrives
 -- disabled, and INSERT IGNORE leaves alone a shop that already chose a value.
 INSERT IGNORE INTO `config` (`name`, `value`, `secured`, `hidden`, `created_at`, `updated_at`) VALUES
-    ('vat_exemption_mode', 'disabled', 0, 0, NOW(), NOW());
+    ('vat_exemption_mode', 'disabled', 0, 0, NOW(), NOW()),
+    ('vat_verification_lifetime_days', '90', 0, 0, NOW(), NOW());
 
 SET FOREIGN_KEY_CHECKS = 1;

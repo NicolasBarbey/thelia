@@ -36,6 +36,7 @@ use Thelia\Domain\Sale\ReservedPrice;
 use Thelia\Domain\Sale\ReservedSalePriceResolver;
 use Thelia\Domain\Sale\SaleAudienceChecker;
 use Thelia\Domain\Shipping\Service\PostageTaxBreakdownCalculator;
+use Thelia\Domain\Taxation\Service\VatExemptionResolver;
 use Thelia\Log\Tlog;
 use Thelia\Model\AddressQuery;
 use Thelia\Model\Base\CustomerQuery;
@@ -73,6 +74,7 @@ class Cart extends BaseAction implements EventSubscriberInterface
         protected PostageTaxBreakdownCalculator $postageTaxBreakdownCalculator,
         protected ReservedSalePriceResolver $reservedSalePriceResolver,
         protected SaleAudienceChecker $saleAudienceChecker,
+        protected VatExemptionResolver $vatExemptionResolver,
     ) {
     }
 
@@ -154,9 +156,22 @@ class Cart extends BaseAction implements EventSubscriberInterface
 
         try {
             $postage = $this->getPostageByDeliveryModuleId($cart, $dispatcher, $moduleId, $deliveryAddressId);
+
+            // Reverse charge covers the carriage as well as the goods. The
+            // delivery module quoted a taxed postage without knowing who is
+            // buying - its buildOrderPostage() is given a country, not a cart -
+            // so the tax it added is taken back here, where the cart is known.
+            $amountTax = (float) ($postage->getAmountTax() ?? 0.0);
+            $amount = (float) $postage->getAmount();
+
+            if ($this->vatExemptionResolver->isExemptedForCart($cart)) {
+                $amount -= $amountTax;
+                $amountTax = 0.0;
+            }
+
             $cart
-                ->setPostage((string) $postage->getAmount())
-                ->setPostageTax((string) ($postage->getAmountTax() ?? 0.0))
+                ->setPostage((string) $amount)
+                ->setPostageTax((string) $amountTax)
                 ->setPostageTaxRuleTitle($postage->getTaxRuleTitle())
                 ->save();
         } catch (\Exception $e) {

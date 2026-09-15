@@ -16,14 +16,18 @@ namespace Thelia\Model;
 
 use Propel\Runtime\Connection\ConnectionInterface;
 use Propel\Runtime\Exception\PropelException;
+use Propel\Runtime\Propel;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Thelia\Core\Event\Cart\CartEvent;
 use Thelia\Core\Event\Cart\CartItemEvent;
+use Thelia\Core\Event\Tax\CartTaxCalculatorEvent;
 use Thelia\Core\Event\TheliaEvents;
 use Thelia\Core\Translation\Translator;
 use Thelia\Domain\Cart\Exception\NotEnoughStockException;
+use Thelia\Domain\Taxation\TaxEngine\TaxCalculatorInterface;
 use Thelia\Domain\Taxation\TaxEngine\TaxCalculatorResolverTrait;
 use Thelia\Model\Base\CartItem as BaseCartItem;
+use Thelia\Model\Map\TaxTableMap;
 
 class CartItem extends BaseCartItem
 {
@@ -181,11 +185,41 @@ class CartItem extends BaseCartItem
     }
 
     /**
+     * The calculator for this line, which is the calculator for its cart: the
+     * VAT a line carries depends on who is buying, not only on what is bought.
+     *
+     * A line with no cart yet - one being built - falls back to the plain
+     * calculator rather than guessing.
+     *
+     * @throws PropelException
+     */
+    private function createCartTaxCalculator(): TaxCalculatorInterface
+    {
+        $cart = $this->getCart();
+
+        if (!$cart instanceof Cart) {
+            return $this->createTaxCalculator();
+        }
+
+        $connection = Propel::getServiceContainer()->getWriteConnection(TaxTableMap::DATABASE_NAME);
+
+        // No dispatcher outside of a booted kernel (install scripts, standalone CLI).
+        if (!method_exists($connection, 'getEventDispatcher') || null === $eventDispatcher = $connection->getEventDispatcher()) {
+            return $this->createTaxCalculator();
+        }
+
+        $event = new CartTaxCalculatorEvent($cart);
+        $eventDispatcher->dispatch($event, TheliaEvents::TAX_GET_CART_CALCULATOR);
+
+        return $event->getTaxCalculator() ?? $this->createTaxCalculator();
+    }
+
+    /**
      * @throws PropelException
      */
     public function getTaxedPrice(Country $country, ?State $state = null): float
     {
-        return $this->createTaxCalculator()->load($this->getProduct(), $country, $state)->getTaxedPrice((float) $this->getPrice());
+        return $this->createCartTaxCalculator()->load($this->getProduct(), $country, $state)->getTaxedPrice((float) $this->getPrice());
     }
 
     /**
@@ -193,7 +227,7 @@ class CartItem extends BaseCartItem
      */
     public function getTaxedPromoPrice(Country $country, ?State $state = null): float
     {
-        return $this->createTaxCalculator()->load($this->getProduct(), $country, $state)->getTaxedPrice((float) $this->getPromoPrice());
+        return $this->createCartTaxCalculator()->load($this->getProduct(), $country, $state)->getTaxedPrice((float) $this->getPromoPrice());
     }
 
     /**
