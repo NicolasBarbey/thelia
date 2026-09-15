@@ -113,7 +113,13 @@ readonly class OrderFacade
             // Decided once, here, on the cart that is being turned into an order,
             // and never asked again afterwards: from now on the answer is the
             // vat_exempted the billing address was frozen with.
-            $vatExempted = $this->vatExemptionResolver->isExemptedForCart($cart);
+            //
+            // When the order reuses an already-existing OrderAddress instead of
+            // one copied from this cart (useOrderDefinedAddresses), nothing
+            // guarantees that address still carries a fresh verification: an
+            // exemption resolved from today's cart would be frozen onto an
+            // invoice address it was never actually checked against.
+            $vatExempted = !$useOrderDefinedAddresses && $this->vatExemptionResolver->isExemptedForCart($cart);
 
             $taxCountry = $this->orderAddressPersister->prepareOrderAddresses(
                 $placedOrder,
