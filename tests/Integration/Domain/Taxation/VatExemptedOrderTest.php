@@ -14,13 +14,17 @@ declare(strict_types=1);
 
 namespace Thelia\Tests\Integration\Domain\Taxation;
 
+use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Thelia\Action\Cart as CartAction;
+use Thelia\Core\Event\Cart\CartCheckoutEvent;
 use Thelia\Core\Event\Order\OrderEvent;
 use Thelia\Core\Event\Order\OrderPaymentEvent;
 use Thelia\Core\Event\TheliaEvents;
 use Thelia\Core\HttpFoundation\Session\Session;
 use Thelia\Domain\Checkout\Service\CheckoutPaymentService;
 use Thelia\Domain\Taxation\Enum\VatExemptionMode;
+use Thelia\Domain\Taxation\Service\VatExemptionResolver;
 use Thelia\Model\Cart;
 use Thelia\Model\CartAddress;
 use Thelia\Model\CartItem;
@@ -28,6 +32,7 @@ use Thelia\Model\ConfigQuery;
 use Thelia\Model\Country;
 use Thelia\Model\ModuleQuery;
 use Thelia\Model\Order;
+use Thelia\Model\OrderPostage;
 use Thelia\Model\OrderProductQuery;
 use Thelia\Model\OrderProductTaxQuery;
 use Thelia\Model\ProductSaleElementsQuery;
@@ -93,6 +98,88 @@ final class VatExemptedOrderTest extends ActionIntegrationTestCase
             'The buyer must see the untaxed total in the cart, not only on the invoice.',
         );
         self::assertEqualsWithDelta(0.0, (float) $cart->getTotalVAT($country, null, false), 0.0001);
+    }
+
+    /**
+     * getCalculatedDiscount() has its own route to a tax calculator, separate
+     * from the one cart lines use: an exempt cart proves nothing about its
+     * discount unless a discount is actually on it.
+     */
+    public function testAnExemptCartsDiscountIsAlsoShownUntaxed(): void
+    {
+        $this->configure(VatExemptionMode::VERIFIED_VAT_NUMBER);
+        $cart = $this->cartWithItems('BE', new \DateTime('-10 days'));
+        $cart->setDiscount('2.00')->save($this->getPropelConnection());
+        $country = $this->countryOf('FR');
+
+        self::assertEqualsWithDelta(
+            $cart->getTotalAmount(true, $country),
+            $cart->getTaxedAmount($country, true),
+            0.0001,
+            'An exempt cart must show the same total with or without tax even once a discount is deducted: '
+            .'the discount itself must not be taxed away by a calculator that forgot the exemption.',
+        );
+        self::assertEqualsWithDelta(0.0, (float) $cart->getTotalVAT($country, null, true), 0.0001);
+    }
+
+    /**
+     * calculatePostage() is the only listener that takes VAT off a delivery
+     * quote, and it only runs once, on CART_SET_POSTAGE - so a buyer who picks
+     * a delivery module before supplying the VAT number that exempts him would
+     * keep the postage tax quoted for the wrong buyer, unless changing the
+     * invoice address after the fact re-fires the same listener.
+     */
+    public function testChangingTheInvoiceAddressAfterPostageWasQuotedRecalculatesItsTax(): void
+    {
+        $this->configure(VatExemptionMode::VERIFIED_VAT_NUMBER);
+        $cart = $this->createCheckoutReadyCart('FR', null)['cart'];
+
+        $dispatcher = new EventDispatcher();
+        $action = new class($this->getService(VatExemptionResolver::class)) extends CartAction {
+            public OrderPostage $quote;
+
+            public function __construct(VatExemptionResolver $vatExemptionResolver)
+            {
+                $this->vatExemptionResolver = $vatExemptionResolver;
+            }
+
+            protected function getPostageByDeliveryModuleId(
+                Cart $cart,
+                EventDispatcherInterface $dispatcher,
+                int $moduleId,
+                int $deliveryAddressId,
+            ): OrderPostage {
+                return $this->quote;
+            }
+        };
+        $action->quote = new OrderPostage(12.0, 2.0, 'VAT 20');
+        $dispatcher->addListener(TheliaEvents::CART_SET_POSTAGE, $action->calculatePostage(...));
+
+        $action->calculatePostage(new CartCheckoutEvent($cart), TheliaEvents::CART_SET_POSTAGE, $dispatcher);
+        $cart->reload();
+        self::assertEqualsWithDelta(
+            2.0,
+            (float) $cart->getPostageTax(),
+            0.0001,
+            'Control: the initial quote must actually carry a postage tax, or the test proves nothing.',
+        );
+
+        $exemptingAddress = $this->createCartAddress(
+            $this->factory->customerTitle()->getId(),
+            $this->countryOf('BE')->getId(),
+            'BE0123456789',
+            new \DateTime('-10 days'),
+        );
+        $event = (new CartCheckoutEvent($cart))->setCartAddress($exemptingAddress);
+        $action->setInvoiceAddressManual($event, TheliaEvents::CART_SET_INVOICE_ADDRESS_MANUAL, $dispatcher);
+        $cart->reload();
+
+        self::assertEqualsWithDelta(
+            0.0,
+            (float) $cart->getPostageTax(),
+            0.0001,
+            'The postage tax must be recalculated once the new invoice address qualifies for exemption.',
+        );
     }
 
     public function testTheSameCartIsShownTaxedWhenTheSettingIsOff(): void

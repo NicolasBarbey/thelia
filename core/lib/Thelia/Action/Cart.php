@@ -180,13 +180,14 @@ class Cart extends BaseAction implements EventSubscriberInterface
         }
     }
 
-    public function setInvoiceAddress(CartCheckoutEvent $event): void
+    public function setInvoiceAddress(CartCheckoutEvent $event, $eventName, EventDispatcherInterface $dispatcher): void
     {
         $cart = $event->getCart();
         $addressId = $event->getInvoiceAddressId();
         if (!$addressId) {
             $cart->setAddressInvoiceId(null)
                 ->save();
+            $this->recalculatePostageForNewInvoiceAddress($cart, $dispatcher);
 
             return;
         }
@@ -206,15 +207,17 @@ class Cart extends BaseAction implements EventSubscriberInterface
         $cart
             ->setAddressInvoiceId($cartAddress->getId())
             ->save();
+        $this->recalculatePostageForNewInvoiceAddress($cart, $dispatcher);
     }
 
-    public function setInvoiceAddressManual(CartCheckoutEvent $event): void
+    public function setInvoiceAddressManual(CartCheckoutEvent $event, $eventName, EventDispatcherInterface $dispatcher): void
     {
         $cart = $event->getCart();
         $cartAddress = $event->getCartAddress();
         if (null === $cartAddress) {
             $cart->setAddressInvoiceId(null)
                 ->save();
+            $this->recalculatePostageForNewInvoiceAddress($cart, $dispatcher);
 
             return;
         }
@@ -224,6 +227,26 @@ class Cart extends BaseAction implements EventSubscriberInterface
         $cart
             ->setAddressInvoiceId($cartAddress->getId())
             ->save();
+        $this->recalculatePostageForNewInvoiceAddress($cart, $dispatcher);
+    }
+
+    /**
+     * The billing address is what VAT exemption is decided on, but postage is
+     * only ever priced once, by calculatePostage() reacting to CART_SET_POSTAGE.
+     * A buyer who picks a delivery module and only then changes, adds or drops
+     * an exempting VAT number would otherwise keep whatever postage tax was
+     * quoted before - wrong in either direction. Re-firing the same event is a
+     * no-op through calculatePostage() itself when no module is selected yet.
+     */
+    private function recalculatePostageForNewInvoiceAddress(CartModel $cart, EventDispatcherInterface $dispatcher): void
+    {
+        if (null === $cart->getDeliveryModuleId() || null === $cart->getAddressDeliveryId()) {
+            return;
+        }
+
+        $postageEvent = new CartCheckoutEvent($cart);
+        $postageEvent->setDeliveryModuleId($cart->getDeliveryModuleId());
+        $dispatcher->dispatch($postageEvent, TheliaEvents::CART_SET_POSTAGE);
     }
 
     public function persistCart(CartPersistEvent $event): void
