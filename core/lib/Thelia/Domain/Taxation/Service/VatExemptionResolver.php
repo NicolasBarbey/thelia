@@ -36,7 +36,7 @@ use Thelia\Model\Order;
  * than the default taxation country, because the rule is about where the seller
  * is established.
  */
-readonly class VatExemptionResolver
+final readonly class VatExemptionResolver
 {
     public function __construct(
         private EuropeanUnionCountries $europeanUnionCountries,

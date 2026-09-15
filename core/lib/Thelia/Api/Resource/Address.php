@@ -381,8 +381,8 @@ class Address implements PropelResourceInterface
 
     /**
      * Only ever called by the transformer filling the resource from the model:
-     * the property carries Column(readOnly: true), so nothing a client sends
-     * reaches it.
+     * the property is read-only by the absence of a write group, as documented
+     * above, so nothing a client sends reaches it.
      */
     public function setVatVerifiedAt(?\DateTime $vatVerifiedAt): self
     {
