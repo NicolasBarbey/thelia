@@ -269,6 +269,7 @@ final class AddressApiTest extends ApiTestCase
         $data = json_decode($response->getContent(), true);
         self::assertSame('Acme SPRL', $data['vatVerifiedName']);
         self::assertStringStartsWith('2026-01-15', $data['vatVerifiedAt']);
+        self::assertFalse($data['vatVerificationValid'], 'A verification older than its configured lifetime must no longer read as valid.');
 
         // Declaring one's own VAT exemption is exactly what this must not allow.
         // Proven on the creation rather than the update: PUT on this resource is
@@ -294,6 +295,26 @@ final class AddressApiTest extends ApiTestCase
             'A buyer must never be able to declare his own verification.',
         );
         self::assertNull($createdAddress->getVatVerifiedName());
+    }
+
+    public function testARecentVerificationIsReadableAsValid(): void
+    {
+        $factory = $this->createFixtureFactory();
+        $customer = $factory->customer($factory->customerTitle(), ['password' => 'password']);
+        $address = $factory->address($customer);
+        $statement = $this->getPropelConnection()->prepare(
+            'UPDATE `address` SET `vat_verified_at` = ? WHERE `id` = ?'
+        );
+        $statement->execute([(new \DateTime('-10 days'))->format('Y-m-d H:i:s'), $address->getId()]);
+        $address->reload();
+
+        $token = $this->authenticateAsCustomer($customer);
+
+        $response = $this->jsonRequest('GET', '/api/front/account/addresses/'.$address->getId(), token: $token);
+
+        self::assertJsonResponseSuccessful($response);
+        $data = json_decode($response->getContent(), true);
+        self::assertTrue($data['vatVerificationValid']);
     }
 
     private function payload(CustomerTitle $title): array

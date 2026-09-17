@@ -209,6 +209,9 @@ class Address implements PropelResourceInterface
     #[Groups([self::GROUP_ADMIN_READ, self::GROUP_ADMIN_READ_SINGLE, self::GROUP_FRONT_READ, self::GROUP_FRONT_READ_SINGLE])]
     public ?string $vatVerifiedName = null;
 
+    #[Groups([self::GROUP_ADMIN_READ, self::GROUP_ADMIN_READ_SINGLE, self::GROUP_FRONT_READ, self::GROUP_FRONT_READ_SINGLE])]
+    public ?bool $vatVerificationValid = null;
+
     #[Groups([...self::GROUP_ADMIN_COMBINED, ...self::GROUP_FRONT_COMBINED])]
     public ?string $cellphone = null;
 
@@ -399,6 +402,18 @@ class Address implements PropelResourceInterface
     public function setVatVerifiedName(?string $vatVerifiedName): self
     {
         $this->vatVerifiedName = $vatVerifiedName;
+
+        return $this;
+    }
+
+    public function getVatVerificationValid(): ?bool
+    {
+        return $this->vatVerificationValid;
+    }
+
+    public function setVatVerificationValid(?bool $vatVerificationValid): self
+    {
+        $this->vatVerificationValid = $vatVerificationValid;
 
         return $this;
     }
