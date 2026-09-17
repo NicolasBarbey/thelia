@@ -85,6 +85,32 @@ final class VatExemptedOrderTest extends ActionIntegrationTestCase
         self::assertEqualsWithDelta(0.0, $tax, 0.0001, 'The VAT of an exempt order is zero.');
     }
 
+    /**
+     * The invoice has to state the VAT the buyer accounts for himself, and the
+     * order carries no tax line to add up: the figure only survives if it was
+     * frozen when the order was placed.
+     */
+    public function testTheVatTheExemptOrderDidNotChargeIsFrozenOnItsInvoiceAddress(): void
+    {
+        $this->configure(VatExemptionMode::VERIFIED_VAT_NUMBER);
+        $order = $this->checkout($this->createCheckoutReadyCart('BE', new \DateTime('-10 days')));
+
+        self::assertEqualsWithDelta(
+            2.0,
+            (float) $order->getOrderAddressRelatedByInvoiceOrderAddressId()->getVatExemptedAmount(),
+            0.0001,
+            'A single line of 10.00 taxed at 20 % owes 2.00 of VAT, exempted here.',
+        );
+    }
+
+    public function testATaxedOrderFreezesNoExemptedVat(): void
+    {
+        $this->configure(VatExemptionMode::DISABLED);
+        $order = $this->checkout($this->createCheckoutReadyCart('BE', new \DateTime('-10 days')));
+
+        self::assertNull($order->getOrderAddressRelatedByInvoiceOrderAddressId()->getVatExemptedAmount());
+    }
+
     public function testAnExemptCartIsShownUntaxedBeforeTheOrderIsEvenPlaced(): void
     {
         $this->configure(VatExemptionMode::VERIFIED_VAT_NUMBER);

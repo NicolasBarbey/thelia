@@ -1217,6 +1217,12 @@ PREPARE add_column_statement FROM @statement;
 EXECUTE add_column_statement;
 DEALLOCATE PREPARE add_column_statement;
 
+SET @add_column := (SELECT COUNT(*) = 0 FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'order_address' AND `COLUMN_NAME` = 'vat_exempted_amount');
+SET @statement := IF(@add_column, 'ALTER TABLE `order_address` ADD `vat_exempted_amount` DECIMAL(16,6) NULL DEFAULT NULL COMMENT \'the VAT the order would have carried had it not been exempted, frozen at creation because an exempt order writes no tax line to read it back from\' AFTER `vat_exempted`', 'DO 0');
+PREPARE add_column_statement FROM @statement;
+EXECUTE add_column_statement;
+DEALLOCATE PREPARE add_column_statement;
+
 -- A shop that upgrades keeps taxing the way it did: the setting arrives
 -- disabled, and INSERT IGNORE leaves alone a shop that already chose a value.
 INSERT IGNORE INTO `config` (`name`, `value`, `secured`, `hidden`, `created_at`, `updated_at`) VALUES

@@ -838,6 +838,7 @@ CREATE TABLE `order_address`
     `vat_verified_at` DATETIME COMMENT 'when a verification service last confirmed the VAT number, NULL as long as none has, which is what keeps an unverified address taxed',
     `vat_verified_name` VARCHAR(255) COMMENT 'the business name the verification service returned for the VAT number, when it discloses one',
     `vat_exempted` TINYINT DEFAULT 0 NOT NULL COMMENT 'the order left without VAT because the buyer is liable for it, frozen here so that revoking the number afterwards never changes what was invoiced',
+    `vat_exempted_amount` DECIMAL(16,6) COMMENT 'the VAT the order would have carried had it not been exempted, frozen at creation because an exempt order writes no tax line to read it back from',
     `firstname` VARCHAR(255) NOT NULL,
     `lastname` VARCHAR(255) NOT NULL,
     `address1` VARCHAR(255) NOT NULL,

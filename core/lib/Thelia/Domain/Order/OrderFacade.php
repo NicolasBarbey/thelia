@@ -32,6 +32,7 @@ use Thelia\Domain\Order\Service\TaxProvider;
 use Thelia\Domain\Order\Service\TranslationProvider;
 use Thelia\Domain\Order\Service\VirtualProductHandler;
 use Thelia\Domain\Shipping\Service\PostageTaxBreakdownCalculator;
+use Thelia\Domain\Taxation\Service\ExemptedVatCalculator;
 use Thelia\Domain\Taxation\Service\VatExemptionResolver;
 use Thelia\Exception\TheliaProcessException;
 use Thelia\Model\Cart as CartModel;
@@ -64,6 +65,7 @@ readonly class OrderFacade
         private ConsentAcceptanceStore $consentAcceptanceStore,
         private RequestStack $requestStack,
         private VatExemptionResolver $vatExemptionResolver,
+        private ExemptedVatCalculator $exemptedVatCalculator,
     ) {
     }
 
@@ -132,7 +134,9 @@ readonly class OrderFacade
             $placedOrder->setStatusId(OrderStatusQuery::getNotPaidStatus()?->getId());
             $placedOrder->save($connection);
 
-            if (!$vatExempted) {
+            if ($vatExempted) {
+                $this->freezeExemptedVat($placedOrder, $cart, $taxCountry, $lang, $connection);
+            } else {
                 $this->persistPostageTaxBreakdown($placedOrder, $cart, $taxCountry, $lang, $connection);
             }
 
@@ -242,6 +246,44 @@ readonly class OrderFacade
             $this->orderTransactionManager->rollback($connection);
             throw $throwable;
         }
+    }
+
+    /**
+     * Freezes the VAT the order would have carried, so that an invoice under
+     * reverse charge can state it.
+     *
+     * An exempt order writes no tax line at all, and the setting that exempted
+     * it can be turned off the next day: nothing of the amount survives unless
+     * it is written down here, while the cart it was computed from is still
+     * around.
+     *
+     * @throws PropelException
+     */
+    private function freezeExemptedVat(
+        ModelOrder $placedOrder,
+        CartModel $cart,
+        Country $taxCountry,
+        LangModel $lang,
+        ConnectionInterface $connection,
+    ): void {
+        $invoiceAddress = OrderAddressQuery::create()->findPk($placedOrder->getInvoiceOrderAddressId());
+
+        if (null === $invoiceAddress) {
+            return;
+        }
+
+        $exemptedVat = $this->exemptedVatCalculator->forCart(
+            $cart,
+            $taxCountry,
+            OrderAddressQuery::create()->findPk($placedOrder->getDeliveryOrderAddressId())?->getState(),
+            (float) $placedOrder->getPostage(),
+            $placedOrder->getDeliveryModuleId(),
+            $lang->getLocale(),
+        );
+
+        $invoiceAddress
+            ->setVatExemptedAmount((string) $exemptedVat)
+            ->save($connection);
     }
 
     /**

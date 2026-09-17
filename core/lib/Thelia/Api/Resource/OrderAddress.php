@@ -114,6 +114,9 @@ class OrderAddress implements PropelResourceInterface
     #[Groups([self::GROUP_ADMIN_READ, Order::GROUP_ADMIN_READ, Order::GROUP_ADMIN_READ_SINGLE, Order::GROUP_FRONT_READ_SINGLE])]
     public ?string $vatVerifiedName = null;
 
+    #[Groups([self::GROUP_ADMIN_READ, Order::GROUP_ADMIN_READ, Order::GROUP_ADMIN_READ_SINGLE, Order::GROUP_FRONT_READ_SINGLE])]
+    public ?string $vatExemptedAmount = null;
+
     #[Relation(targetResource: CustomerTitle::class)]
     #[Groups(groups: [self::GROUP_ADMIN_READ, self::GROUP_ADMIN_WRITE, Order::GROUP_ADMIN_READ_SINGLE, Order::GROUP_FRONT_READ_SINGLE])]
     public CustomerTitle $customerTitle;
@@ -308,6 +311,18 @@ class OrderAddress implements PropelResourceInterface
     public function setVatVerifiedName(?string $vatVerifiedName): self
     {
         $this->vatVerifiedName = $vatVerifiedName;
+
+        return $this;
+    }
+
+    public function getVatExemptedAmount(): ?string
+    {
+        return $this->vatExemptedAmount;
+    }
+
+    public function setVatExemptedAmount(?string $vatExemptedAmount): self
+    {
+        $this->vatExemptedAmount = $vatExemptedAmount;
 
         return $this;
     }
