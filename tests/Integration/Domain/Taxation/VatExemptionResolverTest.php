@@ -108,6 +108,19 @@ final class VatExemptionResolverTest extends IntegrationTestCase
         self::assertFalse($this->resolver()->isExemptedForCart($this->factory->cart()));
     }
 
+    public function testAFrozenExemptedOrderStaysExempted(): void
+    {
+        $order = $this->factory->order();
+        $order->getOrderAddressRelatedByInvoiceOrderAddressId()->setVatExempted(1)->save($this->getPropelConnection());
+
+        self::assertTrue($this->resolver()->isExemptedForOrder($order));
+    }
+
+    public function testAnOrderWithoutTheFrozenFlagIsTaxed(): void
+    {
+        self::assertFalse($this->resolver()->isExemptedForOrder($this->factory->order()));
+    }
+
     private function resolver(): VatExemptionResolver
     {
         return $this->getService(VatExemptionResolver::class);

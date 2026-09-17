@@ -72,7 +72,7 @@ final readonly class VatExemptionResolver
      */
     public function isExemptedForOrder(Order $order): bool
     {
-        return 1 === $order->getOrderAddressRelatedByInvoiceOrderAddressId()?->getVatExempted();
+        return $order->getVatExempted();
     }
 
     private function qualifies(?\DateTimeInterface $verifiedAt, ?Country $country): bool
