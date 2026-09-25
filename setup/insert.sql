@@ -95,7 +95,8 @@ INSERT INTO `config` (`id`, `name`, `value`, `secured`, `hidden`, `created_at`, 
 (84, 'order_return_enabled', '0', 0, 0, NOW(), NOW()),
 (85, 'order_return_window_days', '14', 0, 0, NOW(), NOW()),
 (86, 'order_return_restock_mode', 'resellable', 0, 0, NOW(), NOW()),
-(87, 'checkout_display_mode', 'steps', 0, 0, NOW(), NOW())
+(87, 'checkout_display_mode', 'steps', 0, 0, NOW(), NOW()),
+(88, 'admin_two_factor_required', '0', 0, 0, NOW(), NOW())
 
 ;
 
