@@ -17,6 +17,7 @@ namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 use Symfony\Component\Mailer\Messenger\SendEmailMessage;
 use Thelia\Domain\DataTransfer\Job\RunExportJob;
 use Thelia\Domain\DataTransfer\Job\RunImportJob;
+use Thelia\Domain\Search\Message\SynchronizeSearchDocuments;
 use Thelia\Domain\Webhook\Message\DeliverWebhook;
 use Thelia\Messenger\Middleware\ReplayedJobMiddleware;
 use Thelia\Messenger\Serializer\AllowedClassesSerializer;
@@ -65,6 +66,9 @@ return static function (ContainerConfigurator $container): void {
                 // not mailed twice. A cache clear leaves it in place; each item
                 // carries its own lifetime.
                 'thelia.cache.sent_mails' => [
+                    'adapter' => 'cache.app',
+                ],
+                'thelia.cache.search_reindex' => [
                     'adapter' => 'cache.app',
                 ],
             ],
@@ -331,6 +335,7 @@ return static function (ContainerConfigurator $container): void {
                 RunExportJob::class => 'async_heavy',
                 RunImportJob::class => 'async_heavy',
                 DeliverWebhook::class => 'async',
+                SynchronizeSearchDocuments::class => 'async',
             ],
         ],
     ], prepend: true);
